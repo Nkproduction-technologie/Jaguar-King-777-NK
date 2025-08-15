@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jeu de Serpent 🐍</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#6ee7b7" />
+
+  <meta name="description" content="Un petit jeu de serpent rapide, installable et jouable hors connexion." />
+  <style>
+    :root { --bg:#0f1226; --panel:#171a34; --text:#f4f6ff; --muted:#a7b0d7; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans"; background: radial-gradient(1200px 600px at 50% -10%, #1b1f48, var(--bg)); color: var(--text); }
+    .wrap { max-width: 760px; margin: auto; padding: 20px 16px; display: grid; gap: 14px; }
+    header { text-align:center; }
+    h1 { margin: 6px 0 2px; font-size: clamp(1.2rem, 3.5vw, 1.8rem); }
+    p.lead { margin: 0; color: var(--muted); font-size: .98rem; }
+    .stage { background: var(--panel); border: 1px solid rgba(255,255,255,.06); border-radius: 16px; padding: 14px; display: grid; gap: 10px; }
+    canvas { width: min(92vw, 420px); height: min(92vw, 420px); background:#0b0d1e; border-radius: 12px; border:1px solid rgba(255,255,255,.08); image-rendering: pixelated; display:block; margin: 6px auto; }
+    .hud { display:flex; justify-content:center; gap: 16px; color: #cbd5ff; font-weight: 700; }
+    .hint { text-align:center; color: var(--muted); font-size: .92rem; }
+    .btns { display:flex; justify-content:center; gap:10px; }
+    button { appearance:none; background:#12142b; color:var(--text); border:1px solid rgba(255,255,255,.08); border-radius:12px; padding:10px 12px; font-weight:700; cursor:pointer; }
+    button:active { transform: scale(.98); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Jeu de Serpent 🐍</h1>
+      <p class="lead">Clavier : flèches/WASD • Mobile : glisse ton doigt (swipe) pour diriger.</p>
+    </header>
+
+    <section class="stage">
+      <div class="hud">
+        <div>Score : <span id="score">0</span></div>
+        <div>Record : <span id="hi">0</span></div>
+      </div>
+      <canvas id="game" width="400" height="400" aria-label="Zone de jeu du serpent"></canvas>
+      <div class="btns">
+        <button id="play">▶️ Jouer / Reprendre</button>
+        <button id="pause">⏸️ Pause</button>
+        <button id="reset">🔄 Réinitialiser</button>
+      </div>
+      <p class="hint">Astuce : l’app peut s’installer (icône écran d’accueil) et marche hors ligne.</p>
+    </section>
+  </div>
+
+  <script>
+    // Enregistrer le service worker (PWA)
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("service-worker.js").catch(console.error);
+    }
+
+    // === Jeu de serpent minimal, compatible mobile & clavier ===
+    const cvs = document.getElementById("game");
+    const ctx = cvs.getContext("2d");
+    const grid = 20; // taille d'une cellule
+    let speed = 4;   // frameskip (plus bas = plus rapide)
+    let tick = 0;
+
+    const scoreEl = document.getElementById("score");
+    const hiEl = document.getElementById("hi");
+    const hiKey = "snake_hi_v1";
+
+    const state = {
+      running: false,
+      paused: false,
+      snake: { x: 160, y: 160, cells: [], maxCells: 4 },
+      apple: { x: 320, y: 320 },
+      dx: grid,
+      dy: 0,
+      score: 0
+    };
+
+    function getRandomInt(min, max) {
+      return Math.floor(Math.random() * (max - min)) + min;
+    }
+
+    function resetGame() {
+      state.snake.x = 160;
+      state.snake.y = 160;
+      state.snake.cells = [];
+      state.snake.maxCells = 4;
+      state.dx = grid;
+      state.dy = 0;
+      state.apple.x = getRandomInt(0, 20) * grid;
+      state.apple.y = getRandomInt(0, 20) * grid;
+      state.score = 0;
+      scoreEl.textContent = "0";
+      state.running = true;
+      state.paused = false;
+    }
+
+    function setHi() {
+      const hi = +localStorage.getItem(hiKey) || 0;
+      if (state.score > hi) localStorage.setItem(hiKey, String(state.score));
+      hiEl.textContent = Math.max(state.score, hi);
+    }
+    setHi();
+
+    function loop() {
+      requestAnimationFrame(loop);
+      if (!state.running || state.paused) return;
+      if (++tick < speed) return;
+      tick = 0;
+
+      ctx.clearRect(0, 0, cvs.width, cvs.height);
+
+      state.snake.x += state.dx;
+      state.snake.y += state.dy;
+
+      // Wrap (réapparition de l'autre côté)
+      if (state.snake.x < 0) state.snake.x = cvs.width - grid;
+      else if (state.snake.x >= cvs.width) state.snake.x = 0;
+      if (state.snake.y < 0) state.snake.y = cvs.height - grid;
+      else if (state.snake.y >= cvs.height) state.snake.y = 0;
+
+      state.snake.cells.unshift({ x: state.snake.x, y: state.snake.y });
+      if (state.snake.cells.length > state.snake.maxCells) state.snake.cells.pop();
+
+      // pomme
+      ctx.fillStyle = "red";
+      ctx.fillRect(state.apple.x, state.apple.y, grid - 1, grid - 1);
+
+      // serpent
+      ctx.fillStyle = "lime";
+      state.snake.cells.forEach((cell, index) => {
+        ctx.fillRect(cell.x, cell.y, grid - 1, grid - 1);
+
+        // mange
+        if (cell.x === state.apple.x && cell.y === state.apple.y) {
+          state.snake.maxCells++;
+          state.score += 10;
+          scoreEl.textContent = state.score;
+          setHi();
+          state.apple.x = getRandomInt(0, 20) * grid;
+          state.apple.y = getRandomInt(0, 20) * grid;
+        }
+
+        // collision avec soi-même → reset
+        for (let i = index + 1; i < state.snake.cells.length; i++) {
+          if (cell.x === state.snake.cells[i].x && cell.y === state.snake.cells[i].y) {
+            resetGame();
+            return;
+          }
+        }
+      });
+    }
+
+    // Contrôles clavier
+    document.addEventListener("keydown", (e) => {
+      const k = e.key.toLowerCase();
+      if ((k === "arrowleft" || k === "a") && state.dx === 0) { state.dx = -grid; state.dy = 0; state.running = true; }
+      else if ((k === "arrowup" || k === "w") && state.dy === 0) { state.dy = -grid; state.dx = 0; state.running = true; }
+      else if ((k === "arrowright" || k === "d") && state.dx === 0) { state.dx = grid; state.dy = 0; state.running = true; }
+      else if ((k === "arrowdown" || k === "s") && state.dy === 0) { state.dy = grid; state.dx = 0; state.running = true; }
+      else if (k === " " || k === "enter") { state.running = true; state.paused = false; }
+      else if (k === "p") { state.paused = !state.paused; }
+    });
+
+    // Gestes tactiles (swipe) sur le canvas
+    let touchStart = null;
+    cvs.addEventListener("touchstart", (e) => {
+      const t = e.changedTouches[0];
+      if (!t) return;
+      touchStart = { x: t.clientX, y: t.clientY };
+    }, { passive: true });
+
+    cvs.addEventListener("touchend", (e) => {
+      if (!touchStart) return;
+      const t = e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - touchStart.x;
+      const dy = t.clientY - touchStart.y;
+      const adx = Math.abs(dx), ady = Math.abs(dy);
+      if (Math.max(adx, ady) > 18) {
+        if (adx > ady) {
+          if (dx > 0 && state.dx === 0) { state.dx = grid; state.dy = 0; }
+          else if (dx < 0 && state.dx === 0) { state.dx = -grid; state.dy = 0; }
+        } else {
+          if (dy > 0 && state.dy === 0) { state.dy = grid; state.dx = 0; }
+          else if (dy < 0 && state.dy === 0) { state.dy = -grid; state.dx = 0; }
+        }
+        state.running = true;
+        state.paused = false;
+      }
+      touchStart = null;
+    }, { passive: true });
+
+    // Boutons
+    document.getElementById("play").addEventListener("click", () => { state.running = true; state.paused = false; });
+    document.getElementById("pause").addEventListener("click", () => { state.paused = !state.paused; });
+    document.getElementById("reset").addEventListener("click", () => resetGame());
+
+    // Lancer
+    resetGame();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+  </html>
